@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # GrepBugs Copyright (c) 2014-2017 GrepBugs.com
 #
 # GrepBugs is licensed under GPL v2.0 or later; please see the main
@@ -16,10 +16,10 @@ import datetime
 import sqlite3 as lite
 from subprocess import call
 import subprocess
-import cgi
 import time
 import logging
-import ConfigParser
+import configparser
+from base64 import b64decode
 
 cfgfile = os.path.dirname(os.path.abspath(__file__)) + '/etc/grepbugs.cfg'
 dbfile  = os.path.dirname(os.path.abspath(__file__)) + '/data/grepbugs.db'
@@ -27,7 +27,7 @@ gbfile  = os.path.dirname(os.path.abspath(__file__)) + '/data/grepbugs.json'
 logfile = os.path.dirname(os.path.abspath(__file__)) + '/log/grepbugs.log'
 
 # get configuration
-gbconfig  = ConfigParser.ConfigParser()
+gbconfig  = configparser.ConfigParser()
 gbconfig.read(cfgfile)
 
 # determine which binary executables to use
@@ -68,11 +68,11 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 	# get db connection
 	if 'mysql' == gbconfig.get('database', 'database'):
 		try:
-			import MySQLdb
-			mysqldb  = MySQLdb.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
+			import pymysql
+			mysqldb  = pymysql.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
 			mysqlcur = mysqldb.cursor()
 		except Exception as e:
-			print 'Error connecting to MySQL! See log file for details.'
+			print('Error connecting to MySQL! See log file for details.')
 			logging.debug('Error connecting to MySQL: ' + str(e))
 			sys.exit(1)
 
@@ -81,16 +81,16 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 		cur = db.cursor()
 
 	except lite.Error as e:
-		print 'Error connecting to db file! See log file for details.'
+		print('Error connecting to db file! See log file for details.')
 		logging.debug('Error connecting to db file: ' + str(e))
 		sys.exit(1)
 	except Exception as e:
-		print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+		print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 		logging.critical('Unhandled exception: ' + str(e))
 		sys.exit(1)
 
 	if args.u == True:
-		print 'Scanning with existing rules set'
+		print('Scanning with existing rules set')
 		logging.info('Scanning with existing rules set')
 	else:
 		# get latest greps
@@ -142,13 +142,13 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 			db.commit()
 
 	except Exception as e:
-		print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+		print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 		logging.critical('Unhandled exception: ' + str(e))
 		sys.exit(1)
 
 	# execute cloc to get sql output
 	try:
-		print 'counting source files...'
+		print('counting source files...')
 		logging.info('Running cloc for sql output.')
 		return_code = call(["cloc", "--skip-uniqueness", "--quiet", "--sql=" + clocsql, "--sql-project=" + srcdir, srcdir])
 		if 0 != return_code:
@@ -162,7 +162,7 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 		os.remove(clocsql)
 
 	except Exception as e:
-		print 'Error executing cloc sql! Aborting scan! See log file for details.'
+		print('Error executing cloc sql! Aborting scan! See log file for details.')
 		logging.debug('Error executing cloc sql (scan aborted). It is possible there were no results from running cloc.: ' + str(e))
 		return scan_id
 
@@ -201,7 +201,7 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 			db.commit()
 
 	except Exception as e:
-		print 'Error saving cloc txt! Aborting scan! See log file for details.'
+		print('Error saving cloc txt! Aborting scan! See log file for details.')
 		logging.debug('Error saving cloc txt (scan aborted): ' + str(e))
 		return scan_id
 
@@ -212,7 +212,7 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 		greps     = json.load(json_file)
 		json_file.close()
 	except Exception as e:
-		print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+		print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 		logging.critical('Unhandled exception: ' + str(e))
 		sys.exit(1)
 
@@ -221,7 +221,7 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 	rows = cur.fetchall()
 
 	# grep all the bugs and output to file
-	print 'grepping for bugs...'
+	print('grepping for bugs...')
 	logging.info('Start grepping for bugs.')
 
 	# get cloc extensions and create extension array
@@ -249,19 +249,11 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 							if str(lang[1]).strip() == greps[i]['language']:
 								extensions.append(str(lang[0]).strip())
 
-					# search with regex, filter by extensions, and capture result
-					result = ''
-					filter = []
-
-					# build filter by extension
-					for e in extensions:
-						filter.append('--include=*.' + e)
-
+					# search with regex and capture result
 					try:
-						proc   = subprocess.Popen([grepbin, "-n", "-r", "-P"] +  filter + [greps[i]['regex'], srcdir], stdout=subprocess.PIPE)
-						result = proc.communicate()
+						result = subprocess.run([grepbin, "-n", "-r", "-P", greps[i]['regex'], srcdir], capture_output=True, text=True)
 
-						if len(result[0]):	
+						if len(result.stdout):	
 							# update database with new results info
 							result_id = str(uuid.uuid1())
 							params    = [result_id, scan_id, greps[i]['language'], greps[i]['id'], greps[i]['regex'], greps[i]['description']]
@@ -272,7 +264,7 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 								cur.execute("INSERT INTO results (result_id, scan_id, language, regex_id, regex_text, description) VALUES (?, ?, ?, ?, ?, ?);", params)
 								db.commit()
 
-							perline = str(result[0]).split("\n")
+							perline = str(result.stdout).split("\n")
 							for r in range(0, len(perline) - 1):
 								try:
 									rr = str(perline[r]).replace(basedir, '').split(':', 1)
@@ -288,15 +280,15 @@ def local_scan(srcdir, repo='none', account='local_scan', project='none', defaul
 										cur.execute("INSERT INTO results_detail (result_detail_id, result_id, file, line, code) VALUES (?, ?, ?, ?, ?);", params)
 										db.commit()
 
-								except lite.Error, e:
-									print 'SQL error! See log file for details.'
+								except lite.Error as e:
+									print('SQL error! See log file for details.')
 									logging.debug('SQL error with params ' + str(params) + ' and error ' + str(e))
 								except Exception as e:
-									print 'Error parsing result! See log file for details.'
+									print('Error parsing result! See log file for details.')
 									logging.debug('Error parsing result: ' + str(e))
 							
 					except Exception as e:
-						print 'Error calling grep! See log file for details'
+						print('Error calling grep! See log file for details')
 						logging.debug('Error calling grep: ' + str(e))
 
 	params = [project_id]
@@ -323,7 +315,7 @@ def repo_scan(repo, account, force, no_reports):
 		cur = db.cursor()
 
 	except lite.Error as e:
-		print 'Error connecting to db file'
+		print('Error connecting to db file')
 		logging.debug('Error connecting to db file' + str(e))
 		sys.exit(1)
 
@@ -378,7 +370,7 @@ def repo_scan(repo, account, force, no_reports):
 						time.sleep(3) # take a break, throttle a bit
 
 				except Exception as e:
-					print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+					print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 					logging.critical('Unhandled exception: ' + str(e))
 					sys.exit(1)
 
@@ -388,7 +380,7 @@ def repo_scan(repo, account, force, no_reports):
 				sys.exit(1)
 
 			while len(data):
-				print 'Get page: ' + str(page)
+				print('Get page: ' + str(page))
 				for i in range(0, len(data)):
 					do_scan        = True
 					project_name   = data[i]["name"]
@@ -398,7 +390,7 @@ def repo_scan(repo, account, force, no_reports):
 					checkout_url   = 'https://github.com/' + account + '/' + project_name + '.git'
 					cmd            = 'git'
 
-					print project_name + ' last changed on ' + str(last_changed) + ' and last scanned on ' + str(last_scanned)
+					print(project_name + ' last changed on ' + str(last_changed) + ' and last scanned on ' + str(last_scanned))
 
 					if None != last_scanned:
 						if last_changed < last_scanned:
@@ -437,7 +429,7 @@ def repo_scan(repo, account, force, no_reports):
 					checkout_url = 'https://bitbucket.org/' + value['full_name']
 					cmd          = 'git'
 
-					print project_name + ' last changed on ' + str(last_changed) + ' and last scanned on ' + str(last_scanned)
+					print(project_name + ' last changed on ' + str(last_changed) + ' and last scanned on ' + str(last_scanned))
 
 					if None != last_scanned:
 						if last_changed < last_scanned:
@@ -451,7 +443,7 @@ def repo_scan(repo, account, force, no_reports):
 		elif 'sourceforge' == repo:
 			message = 'Support for sourceforge removed because of http://seclists.org/nmap-dev/2015/q2/194. You should move your project to another hosting site, such as GitHub or BitBucket.'
 			logging.debug(message)
-			print message
+			print(message)
 			"""
 			# call api_url
 			r    = requests.get(api_url)
@@ -499,13 +491,13 @@ def repo_scan(repo, account, force, no_reports):
 		except Exception as e:
 			logging.debug('Error removing directory: ' + str(e))
 		
-		print 'SCAN COMPLETE!'
+		print('SCAN COMPLETE!')
 
 def download_rules():
 	url     = gbconfig.get('rules', 'url')
 	
 	logging.info('Retreiving rules from ' + url)
-	print 'attempting to retreive rules...'
+	print('attempting to retreive rules...')
 	
 	try:
 		# if request fails, try 3 times
@@ -519,7 +511,7 @@ def download_rules():
 				with open(gbfile, 'wb') as jsonfile:
 					jsonfile.write(r.text)
 
-				print 'got rules!'
+				print('got rules!')
 
 				# no exceptions so break out of while loop
 				break
@@ -542,13 +534,13 @@ def download_rules():
 					time.sleep(3)
 			
 			except Exception as e:
-				print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+				print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 				logging.critical('Unhandled exception: ' + str(e))
 				sys.exit(1)
 
 		if count == max_tries:
 			# method of last resort!
-			print 'attempting download method of last resort...'
+			print('attempting download method of last resort...')
 			proc = subprocess.Popen(["which", "wget"], stdout=subprocess.PIPE)
 			out  = proc.communicate()
 			wget = str(out[0]).split("\n")
@@ -561,7 +553,7 @@ def download_rules():
 				logging.debug('Error retreiving grep rules (no more tries left. could be using old grep rules.): ' + str(e))
 
 	except Exception as e:
-		print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+		print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 		logging.critical('Unhandled exception: ' + str(e))
 		sys.exit(1)
 
@@ -585,11 +577,11 @@ def checkout_code(cmd, checkout_url, account, project):
 		# phase. To help reduce the time it takes to complete cloning they argument --depth=1 will be used. This
 		# should become a command argument to grepbugs.py in the future.
 		
-		print 'git clone...'
+		print('git clone...')
 		call(['git', 'clone', '--depth=1', split_checkout_url[0] + '://' + args.repo_user + ':' + args.repo_pass + '@' + split_checkout_url[1], account_folder + '/' + project])
 	elif 'svn' == cmd:
 		# need to do a lot of craziness for svn, no wonder people use git now.
-		print 'svn checkout...'
+		print('svn checkout...')
 		found_trunk = False
 
 		call(['svn', '-q', 'checkout', '--depth', 'immediates', checkout_url, account_folder + '/tmp/' + project])
@@ -600,7 +592,7 @@ def checkout_code(cmd, checkout_url, account, project):
 				if 'trunk' == dirs[i]:
 					if os.path.isdir(path + '/' + dirs[i]):
 						found_trunk = True
-						print 'co ' + checkout_url + '/' + dirs[i]
+						print('co ' + checkout_url + '/' + dirs[i])
 						call(['svn', '-q', 'checkout', checkout_url + '/' + dirs[i], account_folder + '/' + project])
 
 		if False == found_trunk:
@@ -609,14 +601,14 @@ def checkout_code(cmd, checkout_url, account, project):
 			for n in os.listdir(path):
 				if os.path.isdir(path + '/' + n):
 					if '.svn' != n:
-						print 'co ' + checkout_url + '/' + n + '/trunk'
+						print('co ' + checkout_url + '/' + n + '/trunk')
 						return_code = call(['svn', '-q', 'checkout', checkout_url + '/' + n + '/trunk', account_folder + '/' + project])
 						if 0 == return_code:
 							found_trunk = True
 
 		if False == found_trunk:
 			# didn't find a trunk, so checkout of last resort
-			print 'WARNING: no trunk found so checking out everything. This could take a while and consume disk space if there are many branches.'
+			print('WARNING: no trunk found so checking out everything. This could take a while and consume disk space if there are many branches.')
 			call(['svn', '-q', 'checkout', checkout_url, account_folder + '/' + project])
 
 		# remove temp checkout
@@ -625,11 +617,11 @@ def checkout_code(cmd, checkout_url, account, project):
 def last_scan(repo, account, project):
 	if 'mysql' == gbconfig.get('database', 'database'):
 		try:
-			import MySQLdb
-			mysqldb  = MySQLdb.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
+			import pymysql
+			mysqldb  = pymysql.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
 			mysqlcur = mysqldb.cursor()
 		except Exception as e:
-			print 'Error connecting to MySQL! See log file for details.'
+			print('Error connecting to MySQL! See log file for details.')
 			logging.debug('Error connecting to MySQL: ' + str(e))
 			sys.exit(1)
 
@@ -639,11 +631,11 @@ def last_scan(repo, account, project):
 			cur = db.cursor()
 			
 		except lite.Error as e:
-			print 'Error connecting to db file! See log file for details.'
+			print('Error connecting to db file! See log file for details.')
 			logging.debug('Error connecting to db file: ' + str(e))
 			sys.exit(1)
 		except Exception as e:
-			print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+			print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 			logging.critical('Unhandled exception: ' + str(e))
 			sys.exit(1)
 
@@ -675,11 +667,11 @@ def html_report(scan_id):
 	
 	if 'mysql' == gbconfig.get('database', 'database'):
 		try:
-			import MySQLdb
-			mysqldb  = MySQLdb.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
+			import pymysql
+			mysqldb  = pymysql.connect(host=gbconfig.get('database', 'host'), user=gbconfig.get('database', 'dbuname'), passwd=gbconfig.get('database', 'dbpword'), db=gbconfig.get('database', 'dbname'))
 			mysqlcur = mysqldb.cursor()
 		except Exception as e:
-			print 'Error connecting to MySQL! See log file for details.'
+			print('Error connecting to MySQL! See log file for details.')
 			logging.debug('Error connecting to MySQL: ' + str(e))
 			sys.exit(1)
 
@@ -690,11 +682,11 @@ def html_report(scan_id):
 			cur = db.cursor()
 
 		except lite.Error as e:
-			print 'Error connecting to db file! See log file for details.'
+			print('Error connecting to db file! See log file for details.')
 			logging.debug('Error connecting to db file: ' + str(e))
 			sys.exit(1)
 		except Exception as e:
-			print 'CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.'
+			print('CRITICAL: Unhandled exception occured! Quiters gonna quit! See log file for details.')
 			logging.critical('Unhandled exception: ' + str(e))
 			sys.exit(1)
 
@@ -711,7 +703,7 @@ def html_report(scan_id):
 
 	# for loop on rows, but only one row
 	for row in rows:
-		print 'writing report...'
+		print('writing report...')
 		htmlfile = os.path.dirname(os.path.abspath(__file__)) + '/out/' + row[0] + '.' + row[1] + '.' + row[2].replace("/", "_") + '.' + row[3] + '.html'
 		tabfile  = os.path.dirname(os.path.abspath(__file__)) + '/out/' + row[0] + '.' + row[1] + '.' + row[2].replace("/", "_") + '.' + row[3] + tabsext
 
@@ -737,7 +729,7 @@ def html_report(scan_id):
 	pre.f { margin-left: 50px; }  /* finding */
 	pre.f span {color: grey; }  /* finding title */
 </style></head><body>""")
-		o.write("<pre class=\"t\">\n" + h.decode('base64') + "</pre>")
+		o.write("<pre class=\"t\">\n" + str(b64decode(h)) + "</pre>")
 		o.write("\n\n<pre>"
 				+ "\nrepo:     " + row[0]
 				+ "\naccount:  " + row[1]
@@ -790,7 +782,7 @@ def html_report(scan_id):
 			if regex != r[1]:
 				html += '	<div class="d"><a style="cursor: pointer;" onclick="javascript:o=document.getElementById(\'r' + str(r[3]) + '\');if(o.style.display==\'none\'){ o.style.display=\'block\';} else {o.style.display=\'none\';}">+ ' + r[2] + "</a></div>\n"
 				html += '	<div id="r' + str(r[3]) + '" style="display:none;margin-left:15px;">' + "\n" # description
-				html += '		<div class="r"><pre>' +  cgi.escape(r[1]) + '</pre></div>' + "\n" #regex
+				html += '		<div class="r"><pre>' +  str(r[1]) + '</pre></div>' + "\n" #regex
 
 			# include repo/account/project/file link
 			if 'github' == row[0]:
@@ -803,10 +795,10 @@ def html_report(scan_id):
 				ltrim_by    = row[2]
 				ltrim_begin = 0
 
-			html += '		<pre class="f"><span>' + r[4][r[4].index(ltrim_by, ltrim_begin):] + ' ' + file_link + ':</span> &nbsp; ' + cgi.escape(r[6]) + '</pre>' + "\n" # finding
+			html += '		<pre class="f"><span>' + r[4][r[4].index(ltrim_by, ltrim_begin):] + ' ' + file_link + ':</span> &nbsp; ' + str(r[6]) + '</pre>' + "\n" # finding
 
 			try:
-				html += '                              <pre class="f"><span>' + r[4][r[4].index(ltrim_by, ltrim_begin):] + ' ' + file_link + ':</span> &nbsp; ' + "\n                                       " + cgi.escape(r[6]) + '</pre>' + "\n" # finding
+				html += '                              <pre class="f"><span>' + r[4][r[4].index(ltrim_by, ltrim_begin):] + ' ' + file_link + ':</span> &nbsp; ' + "\n                                       " + str(r[6]) + '</pre>' + "\n" # finding
 
 			except ValueError:
 				html += 'Exception ValueError: Got a value error on a substring for ' + r[4] + '/' + r[5] + "\n"
@@ -856,12 +848,12 @@ if None == args.d and None == args.r:
 	sys.exit(1)
 
 if None != args.d:
-	print 'scan directory: ' + args.d
+	print('scan directory: ' + args.d)
 	scan_id = local_scan(args.d)
 elif None != args.r:
 	if None == args.a:
-		print 'an account must be specified! use -a to specify an account.'
+		print('an account must be specified! use -a to specify an account.')
 		sys.exit(1)
 
-	print 'scan repo: ' + args.r + ' ' + args.a
+	print('scan repo: ' + args.r + ' ' + args.a)
 	scan_id = repo_scan(args.r, args.a, args.f, args.no_reports)

@@ -1,25 +1,18 @@
-GrepBugs
+GrepBugs3
 ========
 
 A regex based source code scanner.
+Python3 version of [GrepBugs](https://github.com/foospidy/GrepBugs).
 
 ## Usage
-```
-python grepbugs.py -d <source directory>
-python grepbugs.py -r github -a <account>
-python grepbugs.py -r github -a <account> -f
+```bash
+python grepbugs.py -u -d <source directory>
 ```
 
-The latest regular expressions will be pulled from https://www.grepbugs.com
-You can now sign-in at https://grepbugs.com/login to contribute regex rules.
-
-A basic HTML report will be generated in the out/ directory.  A 
+A basic HTML report will be generated in the `out/` directory.  A 
 tab-delimited file with a subset of the information is also created.
 
-Example reports: https://www.grepbugs.com/reports
-
-### Offline Usage
-If you need to run grepbugs when there is not Internet connection then you should, before going offline, download the rules file from https://grepbugs.com/rules and save it to `GrepBugs/data/grepbugs.json`.
+The dictionary file in `data/grepbugs.json` contains all the rules.
 
 ## Configuration
 The `etc/grepbugs.cfg` file can be used to configure:
